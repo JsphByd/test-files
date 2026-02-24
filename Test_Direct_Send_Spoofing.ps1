@@ -45,7 +45,7 @@
 
 
     $subject_number = $subject_number + 1
-    $subject = "DS Test ${subject_number}: Sent from external domain"
+    $subject = "DS Test ${subject_number}: Sent from unregistered domain"
     echo "Sending: '$subject'..."
     Send-MailMessage -SmtpServer $smart_host -Subject $subject -Body $body -BodyAsHtml -From $from_unregistered_domain -To $to
 
