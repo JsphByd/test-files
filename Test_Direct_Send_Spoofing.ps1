@@ -33,7 +33,7 @@
         foreach ($external_address in $external_address_array) {
             $subject_number = $subject_number + 1
             $subject = "DS Test ${subject_number}: Sent from external domain"
-            echo "Sending: '$subject'..."
+            echo "Sending: '$subject'... form ${external_address}"
             Send-MailMessage -SmtpServer $smart_host -Subject $subject -Body $body -BodyAsHtml -From $external_address -To $to
             start-sleep $sleep_interval
         }
