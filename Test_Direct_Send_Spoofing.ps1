@@ -15,14 +15,14 @@
     )
     $subject_number = 1
 
-    $subject = "DS Test $subject_number: Sent from valid mailbox"
+    $subject = "DS Test ${subject_number}: Sent from valid mailbox"
     echo "Sending: '$subject'..."
     Send-MailMessage -SmtpServer $smart_host -Subject $subject -Body $body -BodyAsHtml -From $from_valid_mailbox -To $to
 
     start-sleep $sleep_interval
 
     $subject_number = $subject_number + 1
-    $subject = "DS Test $subject_number: Sent from non-existent mailbox"
+    $subject = "DS Test ${subject_number}: Sent from non-existent mailbox"
     echo "Sending: '$subject'..."
     Send-MailMessage -SmtpServer $smart_host -Subject $subject -Body $body -BodyAsHtml -From $from_invalid_mailbox -To $to
 
@@ -32,20 +32,20 @@
         $external_address_array = $from_external_domain -split ","
         foreach ($external_address in $external_address_array) {
             $subject_number = $subject_number + 1
-            $subject = "DS Test $subject_number: Sent from external domain"
+            $subject = "DS Test ${subject_number}: Sent from external domain"
             echo "Sending: '$subject'..."
             Send-MailMessage -SmtpServer $smart_host -Subject $subject -Body $body -BodyAsHtml -From $external_address -To $to
         }
     } else {   
         $subject_number = $subject_number + 1
-        $subject = "DS Test $subject_number: Sent from external domain"
+        $subject = "DS Test ${subject_number}: Sent from external domain"
         echo "Sending: '$subject'..."
         Send-MailMessage -SmtpServer $smart_host -Subject $subject -Body $body -BodyAsHtml -From $from_external_domain -To $to
     }
 
 
     $subject_number = $subject_number + 1
-    $subject = "DS Test $subject_number: Sent from external domain"
+    $subject = "DS Test ${subject_number}: Sent from external domain"
     echo "Sending: '$subject'..."
     Send-MailMessage -SmtpServer $smart_host -Subject $subject -Body $body -BodyAsHtml -From $from_unregistered_domain -To $to
 
