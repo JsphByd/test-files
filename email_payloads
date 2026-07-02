@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+#
+# send_all_payload_types.sh
+# -------------------------------------------------------------------
+# Linux / swaks port of Send_All_Payload_Types.ps1 from
+# https://github.com/Wh1t3Rh1n0/test-files
+#
+# Sends the repo's benign test files to a mailbox so you can observe
+# how your email security controls (gateway filtering, MOTW handling,
+# attachment policy, etc.) treat each file type.
+#
+#   * Files in ./Messages    are sent AS the HTML message body (no attachment).
+#   * Files in ./Attachments are sent AS a file attachment (plain-text body).
+#
+# Each message is numbered in the Subject line so you can correlate what
+# arrived (or got quarantined) against what was sent, e.g.:
+#     "BHIS 2 [Attachment]: REG_File.reg"
+#     "BHIS 5 [No Attachment]: QR_Code-Harmless_Table.html"
+#
+# ONLY use this against mailboxes / domains you own or are explicitly
+# authorized (in writing) to test.
+#
+# Requires: swaks  (Debian/Ubuntu: sudo apt install swaks ; RHEL: sudo dnf install swaks)
+# -------------------------------------------------------------------
+
+set -o pipefail
+
+# ============ CONFIGURATION (override with flags below) ==============
+FROM=""                                  # -f  envelope/from address
+TO=""                                    # -t  recipient address
+SUBJECT="Payload Test"                   # -s  subject prefix
+SMTP_SERVER="smtp.mail.yahoo.com"        # -S  SMTP host
+PORT="587"                               # -P  SMTP port
+TLS_MODE="starttls"                      # -T  starttls | smtps | none
+USER_ID=""                               # -u  SMTP auth username (blank = no auth)
+PASSWORD=""                              # -p  SMTP auth password (blank = prompt if -u set)
+ATTACHMENTS_FOLDER="./Attachments"       # -a
+MESSAGES_FOLDER="./Messages"             # -m
+SLEEP_INTERVAL="60"                      # -i  seconds between sends
+LOG_FILE="./EmailTest.log"               # -l
+RESUME="1"                               # -r  skip until this message number
+DRY_RUN="0"                              # -n  print commands, don't send
+# ====================================================================
+
+usage() {
+    cat <<EOF
+Usage: $0 -f FROM -t TO [options]
+
+Required:
+  -f FROM        From address
+  -t TO          To address
+
+Options:
+  -s SUBJECT     Subject prefix                  (default: "$SUBJECT")
+  -S SERVER      SMTP server                     (default: $SMTP_SERVER)
+  -P PORT        SMTP port                        (default: $PORT)
+  -T TLS_MODE    starttls | smtps | none          (default: $TLS_MODE)
+  -u USER        SMTP auth username               (default: none)
+  -p PASS        SMTP auth password               (default: prompt if -u given)
+  -a DIR         Attachments folder              (default: $ATTACHMENTS_FOLDER)
+  -m DIR         Messages folder                 (default: $MESSAGES_FOLDER)
+  -i SECONDS     Sleep between sends             (default: $SLEEP_INTERVAL)
+  -l FILE        Log file                        (default: $LOG_FILE)
+  -r N           Resume: skip until message #N   (default: $RESUME)
+  -n             Dry run (print swaks commands, send nothing)
+  -h             Show this help
+EOF
+    exit "${1:-0}"
+}
+
+while getopts "f:t:s:S:P:T:u:p:a:m:i:l:r:nh" opt; do
+    case "$opt" in
+        f) FROM="$OPTARG" ;;
+        t) TO="$OPTARG" ;;
+        s) SUBJECT="$OPTARG" ;;
+        S) SMTP_SERVER="$OPTARG" ;;
+        P) PORT="$OPTARG" ;;
+        T) TLS_MODE="$OPTARG" ;;
+        u) USER_ID="$OPTARG" ;;
+        p) PASSWORD="$OPTARG" ;;
+        a) ATTACHMENTS_FOLDER="$OPTARG" ;;
+        m) MESSAGES_FOLDER="$OPTARG" ;;
+        i) SLEEP_INTERVAL="$OPTARG" ;;
+        l) LOG_FILE="$OPTARG" ;;
+        r) RESUME="$OPTARG" ;;
+        n) DRY_RUN="1" ;;
+        h) usage 0 ;;
+        *) usage 1 ;;
+    esac
+done
+
+# ---- Validation -----------------------------------------------------
+command -v swaks >/dev/null 2>&1 || { echo "ERROR: swaks not found. Install it first." >&2; exit 1; }
+[ -n "$FROM" ] || { echo "ERROR: -f FROM is required." >&2; usage 1; }
+[ -n "$TO" ]   || { echo "ERROR: -t TO is required." >&2; usage 1; }
+
+# Prompt for password once if a username was given but no password.
+if [ -n "$USER_ID" ] && [ -z "$PASSWORD" ]; then
+    read -r -s -p "SMTP password for $USER_ID: " PASSWORD
+    echo
+fi
+
+# ---- Build the reusable swaks argument array ------------------------
+# Auth + TLS flags are identical for every send, so assemble them once.
+COMMON_ARGS=( --server "$SMTP_SERVER" --port "$PORT" --from "$FROM" --to "$TO" )
+
+case "$TLS_MODE" in
+    starttls) COMMON_ARGS+=( --tls ) ;;      # STARTTLS (typical for 587)
+    smtps)    COMMON_ARGS+=( --tlsc ) ;;     # implicit TLS (typical for 465)
+    none)     : ;;                           # cleartext (e.g. port 25)
+    *) echo "ERROR: -T must be starttls, smtps, or none." >&2; exit 1 ;;
+esac
+
+if [ -n "$USER_ID" ]; then
+    COMMON_ARGS+=( --auth --auth-user "$USER_ID" --auth-password "$PASSWORD" )
+fi
+
+email_counter=0
+
+log() {
+    local line="$1"
+    echo "$line"
+    [ -n "$LOG_FILE" ] && echo "$line" >> "$LOG_FILE"
+}
+
+# ---- Core sender ----------------------------------------------------
+# Messages first, then Attachments, sharing ONE running counter across
+# both folders (matching the original script's numbering). Each file is
+# tagged MSG or ATT so the loop knows how to send it.
+{
+    find "$MESSAGES_FOLDER"    -maxdepth 1 -type f 2>/dev/null | sort -f | sed 's/^/MSG\t/'
+    find "$ATTACHMENTS_FOLDER" -maxdepth 1 -type f 2>/dev/null | sort -f | sed 's/^/ATT\t/'
+} | while IFS=$'\t' read -r tag file; do
+    email_counter=$((email_counter + 1))
+
+    if [ "$RESUME" -gt "$email_counter" ] 2>/dev/null; then
+        echo "Resuming on message: $RESUME. Skipping $email_counter..."
+        continue
+    fi
+
+    name="$(basename "$file")"
+    declare -a args=( "${COMMON_ARGS[@]}" )
+
+    if [ "$tag" = "ATT" ]; then
+        subject="$SUBJECT $email_counter [Attachment]: $name"
+        body="Test email #$email_counter
+Attachment: $name
+Sent at: $(date)"
+        args+=( --header "Subject: $subject"
+                --body "$body"
+                --attach-type application/octet-stream
+                --attach-name "$name"
+                --attach "@$file" )
+    else
+        subject="$SUBJECT $email_counter [No Attachment]: $name"
+        args+=( --header "Subject: $subject"
+                --header "Content-Type: text/html; charset=UTF-8"
+                --body "@$file" )
+    fi
+
+    log "$(date '+%Y-%m-%d %H:%M %z') > SENDING: '$subject'..."
+
+    if [ "$DRY_RUN" = "1" ]; then
+        printf 'DRY-RUN: swaks'; printf ' %q' "${args[@]}"; printf '\n'
+    else
+        if ! swaks "${args[@]}"; then
+            log "  !! FAILED to send: '$subject'"
+        fi
+    fi
+
+    echo "...Sleeping $SLEEP_INTERVAL seconds..."
+    sleep "$SLEEP_INTERVAL"
+done
+
+echo "ALL DONE!"
