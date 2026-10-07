@@ -30,6 +30,7 @@ FROM=""                                  # -f  envelope/from address
 TO=""                                    # -t  recipient address
 SUBJECT="Payload Test"                   # -s  subject prefix
 SMTP_SERVER="smtp.mail.yahoo.com"        # -S  SMTP host
+EHLO=""                                  # -e  EHLO/HELO name (blank = swaks default)
 PORT="587"                               # -P  SMTP port
 TLS_MODE="starttls"                      # -T  starttls | smtps | none
 USER_ID=""                               # -u  SMTP auth username (blank = no auth)
@@ -53,6 +54,7 @@ Required:
 Options:
   -s SUBJECT     Subject prefix                  (default: "$SUBJECT")
   -S SERVER      SMTP server                     (default: $SMTP_SERVER)
+  -e EHLO        EHLO/HELO name                  (default: swaks default)
   -P PORT        SMTP port                        (default: $PORT)
   -T TLS_MODE    starttls | smtps | none          (default: $TLS_MODE)
   -u USER        SMTP auth username               (default: none)
@@ -68,12 +70,13 @@ EOF
     exit "${1:-0}"
 }
 
-while getopts "f:t:s:S:P:T:u:p:a:m:i:l:r:nh" opt; do
+while getopts "f:t:s:S:e:P:T:u:p:a:m:i:l:r:nh" opt; do
     case "$opt" in
         f) FROM="$OPTARG" ;;
         t) TO="$OPTARG" ;;
         s) SUBJECT="$OPTARG" ;;
         S) SMTP_SERVER="$OPTARG" ;;
+        e) EHLO="$OPTARG" ;;
         P) PORT="$OPTARG" ;;
         T) TLS_MODE="$OPTARG" ;;
         u) USER_ID="$OPTARG" ;;
@@ -103,6 +106,7 @@ fi
 # ---- Build the reusable swaks argument array ------------------------
 # Auth + TLS flags are identical for every send, so assemble them once.
 COMMON_ARGS=( --server "$SMTP_SERVER" --port "$PORT" --from "$FROM" --to "$TO" )
+[ -n "$EHLO" ] && COMMON_ARGS+=( --ehlo "$EHLO" )
 
 case "$TLS_MODE" in
     starttls) COMMON_ARGS+=( --tls ) ;;      # STARTTLS (typical for 587)
